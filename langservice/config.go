@@ -2,6 +2,8 @@ package langservice
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,8 @@ const (
 var RootPathFinders = map[string]func() string{
 	"go": findRootPathGo,
 }
+
+var lsConfigFile = flag.String("ls-config", "", "Specifies the filename containing JSON data to specify language servers.")
 
 type Protocol string
 
@@ -33,6 +37,13 @@ func LoadConfigFile(filename string) (map[string]Config, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func LoadDefaultConfigFile() (map[string]Config, error) {
+	if *lsConfigFile == "" {
+		return nil, errors.New("--ls-config option is not specified")
+	}
+	return LoadConfigFile(*lsConfigFile)
 }
 
 func findRootPathGo() string {

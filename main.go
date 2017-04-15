@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -15,10 +17,23 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/codegangsta/cli"
 	"github.com/gorilla/websocket"
 	"github.com/karino2/editbook/langservice"
 )
+
+type EditorType string
+
+func (e *EditorType) String() string {
+	return string(*e)
+}
+
+func (e *EditorType) Set(s string) error {
+	if s == "monaco" || s == "ace" || s == "plain" {
+		*e = EditorType(s)
+		return nil
+	}
+	return errors.New("editor must be one of monaco, ace, or plain")
+}
 
 var cmdsch = make(chan string)
 var lsConfig = map[string]langservice.Config{}
@@ -212,28 +227,25 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	go wsSendReceive(cmdsch, conn)
 }
 
-func serverMain(port, editorType, lsConfigFile string) {
+func serverMain(port int, editor string) {
 	log.Println("start main")
 
 	_, sourceFileName, _, _ := runtime.Caller(0)
 	modulepath := filepath.Dir(sourceFileName)
 
-	if lsConfigFile != "" {
-		loadedConfig, err := langservice.LoadConfigFile(lsConfigFile)
-		if err != nil {
-			log.Printf("Failed to load the language server config file: %v", err)
-		} else {
-			lsConfig = loadedConfig
-		}
+	var err error
+	lsConfig, err = langservice.LoadDefaultConfigFile()
+	if err != nil {
+		log.Printf("Failed to load the language server config file: %v", err)
 	}
 
 	fileServer := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(modulepath, "static"))))
-	editorServer := http.StripPrefix("/editor/", http.FileServer(http.Dir(filepath.Join(modulepath, "editors/"+editorType))))
+	editorServer := http.StripPrefix("/editor/", http.FileServer(http.Dir(filepath.Join(modulepath, "editors/" + editor))))
 	http.HandleFunc("/save/", saveHandler)
 	http.HandleFunc("/ws", wsHandler)
 	http.Handle("/static/", fileServer)
 	http.Handle("/editor/", editorServer)
-	go http.ListenAndServe(":"+port, nil)
+	go http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 	ln, err := net.Listen("tcp", ":5124")
 	if err != nil {
 		fmt.Printf("Can't open command socket %s\n", err)
@@ -259,47 +271,19 @@ func clientMain(path string) {
 }
 
 func main() {
-	app := cli.NewApp()
-	app.Name = "editbook"
-	app.Usage = "Tiny text editor server."
-
-	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:  "port, p",
-			Value: "5123",
-			Usage: "Specify port number of outer web connection.",
-		},
-		cli.StringFlag{
-			Name:  "client",
-			Value: "",
-			Usage: "Run as client mode and open `PATH` file relative to server execution folder.",
-		},
-		cli.StringFlag{
-			Name:  "editor",
-			Value: "monaco",
-			Usage: "Specify the name of editor types.",
-		},
-		cli.StringFlag{
-			Name:  "ls-config",
-			Value: "",
-			Usage: "specifies the filename containing JSON data to specify language servers.",
-		},
+	port := flag.Int("port", 5123, "Specify port number of outer web connection.")
+	p := flag.Int("p", 0, "Short version of --port flag.")
+	client := flag.String("client", "", "Run as client mode and open `PATH` file relative to server execution folder.")
+	editor := EditorType("monaco")
+	flag.Var(&editor, "editor", "Specify the name of editor types.")
+	flag.Parse()
+	if *p != 0 {
+		*port = *p
 	}
 
-	app.Action = func(c *cli.Context) error {
-		clientpath := c.String("client")
-
-		if clientpath == "" {
-			port := c.String("port")
-			editorType := c.String("editor")
-			lsConfig := c.String("ls-config")
-			serverMain(port, editorType, lsConfig)
-		} else {
-			clientMain(clientpath)
-		}
-
-		return nil
+	if *client != "" {
+		clientMain(*client)
+		return
 	}
-
-	app.Run(os.Args)
+	serverMain(*port, editor.String())
 }
