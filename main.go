@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/codegangsta/cli"
+	"github.com/spf13/pflag"
 	"github.com/gorilla/websocket"
 	"github.com/karino2/editbook/langservice"
 )
@@ -212,19 +212,16 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	go wsSendReceive(cmdsch, conn)
 }
 
-func serverMain(port, editorType, lsConfigFile string) {
+func serverMain(port uint16, editorType string) {
 	log.Println("start main")
 
 	_, sourceFileName, _, _ := runtime.Caller(0)
 	modulepath := filepath.Dir(sourceFileName)
 
-	if lsConfigFile != "" {
-		loadedConfig, err := langservice.LoadConfigFile(lsConfigFile)
-		if err != nil {
-			log.Printf("Failed to load the language server config file: %v", err)
-		} else {
-			lsConfig = loadedConfig
-		}
+	var err error
+	lsConfig, err = langservice.LoadDefaultConfigFile()
+	if err != nil {
+		log.Printf("Failed to load the language server config file: %v", err)
 	}
 
 	fileServer := http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(modulepath, "static"))))
@@ -233,7 +230,7 @@ func serverMain(port, editorType, lsConfigFile string) {
 	http.HandleFunc("/ws", wsHandler)
 	http.Handle("/static/", fileServer)
 	http.Handle("/editor/", editorServer)
-	go http.ListenAndServe(":"+port, nil)
+	go http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 	ln, err := net.Listen("tcp", ":5124")
 	if err != nil {
 		fmt.Printf("Can't open command socket %s\n", err)
@@ -259,47 +256,21 @@ func clientMain(path string) {
 }
 
 func main() {
-	app := cli.NewApp()
-	app.Name = "editbook"
-	app.Usage = "Tiny text editor server."
+	port := pflag.Uint16P("port", "p", 5123, "Specify port number of outer web connection.")
+	editor := pflag.String("editor", "monaco", "Specify the name of editor types.")
+	client := pflag.String("client", "", "Run as client mode and open `PATH` file relative to server execution folder.")
 
-	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:  "port, p",
-			Value: "5123",
-			Usage: "Specify port number of outer web connection.",
-		},
-		cli.StringFlag{
-			Name:  "client",
-			Value: "",
-			Usage: "Run as client mode and open `PATH` file relative to server execution folder.",
-		},
-		cli.StringFlag{
-			Name:  "editor",
-			Value: "monaco",
-			Usage: "Specify the name of editor types.",
-		},
-		cli.StringFlag{
-			Name:  "ls-config",
-			Value: "",
-			Usage: "specifies the filename containing JSON data to specify language servers.",
-		},
+	pflag.Usage = func() {
+		fmt.Println("editbook: Tiny text editor server.")
+		pflag.PrintDefaults()
 	}
 
-	app.Action = func(c *cli.Context) error {
-		clientpath := c.String("client")
+	pflag.Parse()
+	fmt.Println(*client)
 
-		if clientpath == "" {
-			port := c.String("port")
-			editorType := c.String("editor")
-			lsConfig := c.String("ls-config")
-			serverMain(port, editorType, lsConfig)
-		} else {
-			clientMain(clientpath)
-		}
-
-		return nil
+	if *client == "" {
+		serverMain(*port, *editor)
+	} else {
+		clientMain(*client)
 	}
-
-	app.Run(os.Args)
 }

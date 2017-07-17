@@ -2,15 +2,20 @@ package langservice
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/pflag"
 )
 
 const (
 	LanguageServer Protocol = "LS"
 	TSServer       Protocol = "TS"
 )
+
+var lsConfigFile string
 
 var RootPathFinders = map[string]func() string{
 	"go": findRootPathGo,
@@ -35,6 +40,13 @@ func LoadConfigFile(filename string) (map[string]Config, error) {
 	return result, nil
 }
 
+func LoadDefaultConfigFile() (map[string]Config, error) {
+	if !pflag.Parsed() {
+		return nil, errors.New("flags are not parsed yet")
+	}
+	return LoadConfigFile(lsConfigFile)
+}
+
 func findRootPathGo() string {
 	gopath, err := filepath.Abs(os.Getenv("GOPATH"))
 	if err != nil {
@@ -53,4 +65,8 @@ func DefaultRootPathFinder() string {
 		return ""
 	}
 	return path
+}
+
+func init() {
+	pflag.StringVar(&lsConfigFile, "ls-config", "", "Specify the filename containing JSON data of language servers.")
 }
